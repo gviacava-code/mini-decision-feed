@@ -1,0 +1,35 @@
+# ── Secrets — NEVER commit these ──────────────────────────────
+.env
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# ── DuckDB database file (local only) ─────────────────────────
+*.duckdb
+*.duckdb.wal
+
+# ── dbt ───────────────────────────────────────────────────────
+dbt_project/target/
+dbt_project/dbt_packages/
+dbt_project/logs/
+
+# ── AWS Lambda packaging ──────────────────────────────────────
+lambda_package/
+*.zip
+
+# ── IDEs ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── macOS ─────────────────────────────────────────────────────
+.DS_Store
