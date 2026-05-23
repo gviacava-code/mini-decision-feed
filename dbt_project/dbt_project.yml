@@ -1,0 +1,17 @@
+name: mini_decision_feed
+version: '1.0.0'
+config-version: 2
+
+profile: mini_decision_feed
+
+model-paths: ["models"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  mini_decision_feed:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

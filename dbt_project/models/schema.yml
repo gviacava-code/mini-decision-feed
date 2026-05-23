@@ -1,0 +1,52 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Raw tables loaded by the ingestion script
+    schema: main
+    tables:
+      - name: raw_sales
+        description: Monthly sales data per product loaded from sales.csv
+
+models:
+  - name: stg_sales
+    description: Cleaned and typed version of raw sales data
+    columns:
+      - name: month
+        description: Month in YYYY-MM format
+        tests:
+          - not_null
+      - name: product
+        description: Product name
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Product_A', 'Product_B', 'Product_C']
+      - name: revenue
+        description: Monthly revenue in USD
+        tests:
+          - not_null
+      - name: units_sold
+        description: Number of units sold that month
+        tests:
+          - not_null
+
+  - name: mart_revenue_growth
+    description: Month-over-month revenue growth per product
+    columns:
+      - name: product
+        tests:
+          - not_null
+      - name: month
+        tests:
+          - not_null
+      - name: revenue
+        tests:
+          - not_null
+      - name: prev_month_revenue
+        description: Revenue from the previous month (null for first month)
+      - name: mom_growth_pct
+        description: Month-over-month growth percentage (null for first month)
+
+ 

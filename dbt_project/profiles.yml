@@ -1,0 +1,7 @@
+mini_decision_feed:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ../data/sales.duckdb
+      schema: main
