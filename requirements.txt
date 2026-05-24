@@ -12,7 +12,7 @@ pydantic==2.7.1          # Data validation and typed models (Session 3)
 mangum==0.17.0           # Makes FastAPI work on AWS Lambda (Session 4)
 
 # ── AI layer ───────────────────────────────────────────────────
-anthropic==0.26.0        # Claude API client (Session 3)
+anthropic==0.104.1       # Claude API client (Session 3)
 
 # ── Testing ────────────────────────────────────────────────────
 pytest==8.2.0            # Test runner (Session 2)
