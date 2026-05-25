@@ -1,30 +1,62 @@
 # 🧠 Mini Decision Feed
 
-A weekend-built, production-ready data pipeline that ingests business data,
-transforms it, runs quality checks, and serves AI-generated insights via a REST API.
-
-Inspired by the Aily Labs Data Practitioner stack.
+A production-ready data pipeline that ingests business data, transforms it with dbt,
+validates it with pytest, and serves AI-generated insights via a REST API — deployed on AWS.
 
 ---
 
-## 🗂 Project Structure
+## 🌐 Live API
+
+| Endpoint | URL |
+|---|---|
+| Health check | `GET /health` |
+| Product A insights | `GET /insights/Product_A` |
+| Product B insights | `GET /insights/Product_B` |
+| Product C insights | `GET /insights/Product_C` |
+
+**Base URL:** `https://j9owsglvo3.execute-api.us-east-1.amazonaws.com` ← replace with your API Gateway URL
+
+**Sample response:**
+```json
+{
+  "product": "Product_A",
+  "total_revenue": 209000.0,
+  "best_month": "2024-12",
+  "worst_month": "2024-03",
+  "avg_mom_growth_pct": 8.14,
+  "risk_flag": true,
+  "summary": "Product A generated $209,000 in 2024 with strong 8.14% average growth, though March and June experienced revenue drops requiring investigation.",
+  "recommendations": [
+    "Investigate root causes of March and June revenue drops to identify seasonal patterns.",
+    "Implement early warning systems to detect monthly revenue declines exceeding 10%.",
+    "Capitalize on Q4 momentum by replicating successful strategies into 2025."
+  ]
+}
+```
+
+---
+
+## 🏗 Architecture
 
 ```
-mini-decision-feed/
-├── data/
-│   ├── sales.csv          ← Raw input data
-│   └── sales.duckdb       ← Local database (auto-created, gitignored)
-├── pipeline/
-│   └── ingest.py          ← Session 1: loads CSV into DuckDB
-├── dbt_project/           ← Session 2: SQL transformations
-├── tests/
-│   └── test_quality.py    ← Session 2: data quality checks
-├── api/
-│   └── main.py            ← Session 3: FastAPI + Claude insight engine
-├── .env.example           ← Copy to .env and fill in your keys
-├── .gitignore
-├── requirements.txt
-└── README.md
+CSV Data
+   │
+   ▼
+Python Ingest ──► DuckDB (raw_sales)
+                     │
+                     ▼
+                  dbt Models
+                  ├── stg_sales        (clean + typed)
+                  └── mart_revenue_growth  (MoM growth, risk flags)
+                     │
+                     ├──► pytest (10 quality checks)
+                     │
+                     ▼
+                  FastAPI + Claude API
+                     │
+                     ▼
+              AWS Lambda + API Gateway
+                  (public HTTPS endpoint)
 ```
 
 ---
@@ -33,92 +65,140 @@ mini-decision-feed/
 
 | Layer | Technology |
 |---|---|
-| Language | Python 3.11+ |
+| Language | Python 3.12 |
 | Database | DuckDB |
-| Transformation | dbt |
+| Transformation | dbt-duckdb |
 | Quality | pytest |
-| API | FastAPI + Pydantic |
-| AI | Claude API (Anthropic) |
-| Cloud Storage | AWS S3 |
+| API framework | FastAPI + Pydantic |
+| AI insight engine | Claude API (Anthropic) |
 | Deployment | AWS Lambda + API Gateway |
-| Secrets | AWS Secrets Manager |
+| Secret storage | AWS Secrets Manager |
+| Infrastructure | AWS (us-east-1) |
 
 ---
 
-## 🚀 Quick Start (Session 1)
+## 🗂 Project Structure
 
-### Step 1 — Clone the repo
+```
+mini-decision-feed/
+├── data/
+│   └── sales.csv              ← Raw input (3 products × 12 months)
+├── pipeline/
+│   └── ingest.py              ← Loads CSV into DuckDB
+├── dbt_project/
+│   ├── dbt_project.yml
+│   ├── profiles.yml
+│   └── models/
+│       ├── schema.yml
+│       ├── staging/
+│       │   └── stg_sales.sql          ← Cleans raw data
+│       └── marts/
+│           └── mart_revenue_growth.sql ← MoM growth + risk flags
+├── tests/
+│   └── test_quality.py        ← 10 pytest data quality checks
+├── api/
+│   └── main.py                ← FastAPI app + Claude insight engine
+├── deployment/
+│   ├── lambda_handler.py      ← Mangum adapter for AWS Lambda
+│   └── build_lambda.ps1       ← Packages app for Lambda (Windows)
+├── .env.example
+├── .gitignore
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## 🚀 Run Locally
+
+### Prerequisites
+- Python 3.11+
+- Git
+
+### Setup
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/mini-decision-feed.git
+git clone https://github.com/gviacava-code/mini-decision-feed.git
 cd mini-decision-feed
-```
 
-### Step 2 — Create a virtual environment
-```bash
 python -m venv venv
+source venv/bin/activate        # Mac/Linux
+venv\Scripts\activate           # Windows
 
-# On Mac/Linux:
-source venv/bin/activate
-
-# On Windows:
-venv\Scripts\activate
-```
-
-### Step 3 — Install dependencies
-```bash
 pip install -r requirements.txt
-```
 
-### Step 4 — Copy the environment file
-```bash
 cp .env.example .env
-# Open .env and fill in your ANTHROPIC_API_KEY (needed for Session 3)
+# Add your ANTHROPIC_API_KEY to .env
 ```
 
-### Step 5 — Run the ingestion
+### Run the pipeline
+
 ```bash
+# Step 1 — Ingest
 python pipeline/ingest.py
+
+# Step 2 — Transform
+cd dbt_project
+dbt run --profiles-dir .
+dbt test --profiles-dir .
+cd ..
+
+# Step 3 — Quality checks
+pytest tests/ -v
+
+# Step 4 — Start API
+uvicorn api.main:app --reload
 ```
 
-You should see:
-```
-🚀 Starting ingestion...
-✅ Ingestion complete — 36 rows loaded into raw_sales
-📋 Preview (first 5 rows):
-...
-🎉 Done! Your DuckDB database is ready at: data/sales.duckdb
-```
+Open **http://127.0.0.1:8000/docs** for the interactive API explorer.
 
 ---
 
-## 📅 Build Sessions
+## ☁️ AWS Deployment
 
-| Session | When | Goal |
-|---|---|---|
-| 1 | Friday evening | Ingest CSV into DuckDB ✅ |
-| 2 | Saturday morning | dbt transforms + pytest |
-| 3 | Saturday afternoon | FastAPI + Claude AI insights |
-| 4 | Sunday morning | AWS deployment |
-| 5 | Sunday afternoon | Polish + README + GitHub |
+The app runs on AWS Lambda behind API Gateway.
+
+**To redeploy after changes:**
+
+```powershell
+# Windows PowerShell — run from project root
+.\deployment\build_lambda.ps1
+# Then upload lambda_package.zip to S3 and update Lambda
+```
+
+**AWS services used:**
+- **Lambda** — runs the FastAPI app serverlessly
+- **API Gateway (HTTP)** — public HTTPS URL with routing
+- **S3** — stores the deployment zip (>50MB)
+- **Secrets Manager** — stores the Anthropic API key securely
+- **CloudWatch** — logs and monitoring
 
 ---
 
-## 🔗 Live API
+## 📊 Data Quality
 
-> Coming after Session 4
+10 automated pytest checks run after every dbt transformation:
 
-`GET https://YOUR_API_GATEWAY_URL/insights/Product_A`
+| Check | Layer |
+|---|---|
+| Table exists | Raw |
+| Row count = 36 | Raw |
+| No null products | Raw |
+| No null revenue | Raw |
+| No negative revenue | Raw |
+| No negative units | Raw |
+| Only valid product names | Raw |
+| Mart row count matches | Mart |
+| Growth % null only for first month | Mart |
+| Revenue always positive in mart | Mart |
 
-Sample response:
-```json
-{
-  "product": "Product_A",
-  "summary": "Product A showed consistent growth throughout 2024, with revenue increasing 117% from January to December.",
-  "recommendations": [
-    "Increase inventory for Q4 given the strong seasonal trend.",
-    "Investigate the March dip to understand and prevent recurrence.",
-    "Consider a premium pricing test in Q3 when demand peaks."
-  ],
-  "risk_flag": false
-}
-```
+---
+
+## 🤖 AI Insight Engine
+
+Each API call sends the product's full monthly trend to Claude (claude-sonnet-4-5)
+and receives back a structured JSON response validated by Pydantic:
+
+- **summary** — one sentence describing 2024 performance
+- **recommendations** — 3 specific, data-driven action items
+- **risk_flag** — true if any month had >10% revenue drop
