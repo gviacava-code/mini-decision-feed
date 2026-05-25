@@ -1,14 +1,5 @@
 """
-SESSION 3 — FastAPI + Claude AI Insight Engine
-───────────────────────────────────────────────
-Serves clean data from DuckDB and calls Claude to generate
-structured business insights for each product.
-
-Run locally with:
-    uvicorn api.main:app --reload
-    (run this from the ROOT folder, not from inside api/)
-
-Then open: http://127.0.0.1:8000/docs
+SESSION 3/4 — FastAPI + Claude AI Insight Engine
 """
 
 import os
@@ -23,13 +14,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH  = os.path.join(ROOT_DIR, "data", "sales.duckdb")
+
+def get_db_path():
+    env_path = os.getenv("DB_PATH")
+    if env_path:
+        return env_path
+    bundled = os.path.join(os.path.dirname(__file__), "..", "data", "sales.duckdb")
+    if os.path.exists(bundled):
+        return os.path.abspath(bundled)
+    return os.path.join(ROOT_DIR, "data", "sales.duckdb")
 
 VALID_PRODUCTS = ["Product_A", "Product_B", "Product_C"]
-
-# ── Pydantic response model ─────────────────────────────────────────────────
-# This defines the exact shape of JSON the API will return.
-# Pydantic validates Claude's output against this before sending it.
 
 class InsightResponse(BaseModel):
     product: str
@@ -41,39 +36,27 @@ class InsightResponse(BaseModel):
     summary: str
     recommendations: list[str]
 
-
-# ── FastAPI app ─────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Mini Decision Feed",
     description="AI-powered business insights from your sales pipeline.",
     version="1.0.0",
 )
 
-
-# ── Helper: query DuckDB ────────────────────────────────────────────────────
 def get_product_data(product: str) -> dict:
-    """Pulls all mart data for one product and computes summary stats."""
-    con = duckdb.connect(DB_PATH, read_only=True)
-
+    db_path = get_db_path()
+    con = duckdb.connect(db_path, read_only=True)
     rows = con.execute("""
-        SELECT
-            month,
-            revenue,
-            units_sold,
-            mom_growth_pct,
-            rolling_3m_avg_revenue,
-            is_revenue_drop
+        SELECT month, revenue, units_sold,
+               mom_growth_pct, rolling_3m_avg_revenue, is_revenue_drop
         FROM mart_revenue_growth
         WHERE product = ?
         ORDER BY month
     """, [product]).fetchdf()
-
     con.close()
 
     if rows.empty:
         raise HTTPException(status_code=404, detail=f"No data found for {product}")
 
-    # Build a clean summary dict to pass to Claude
     best_row  = rows.loc[rows["revenue"].idxmax()]
     worst_row = rows.loc[rows["revenue"].idxmin()]
 
@@ -90,34 +73,20 @@ def get_product_data(product: str) -> dict:
         "risk_months": rows[rows["is_revenue_drop"] == True]["month"].astype(str).tolist(),
     }
 
-
 # ── Helper: call Claude ─────────────────────────────────────────────────────
+def format_monthly_row(r):
+    """Formats one row of monthly data as a readable string — avoids nested f-strings."""
+    month = str(r["month"])[:7]
+    revenue = r["revenue"]
+    mom = r["mom_growth_pct"]
+    mom_str = f"{mom:+.1f}%" if mom is not None and str(mom) != "nan" else "n/a"
+    return f"  {month}: ${revenue:,.0f} | MoM: {mom_str}"
+
 def get_claude_insight(data: dict) -> dict:
-    """
-    Sends product data to Claude and asks for structured JSON back.
-    Returns a dict with: summary (str) + recommendations (list of 3 strings).
-    """
+    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-    from anthropic import Anthropic
-    import os, json
+    monthly_lines = "\n".join([format_monthly_row(r) for r in data["monthly_data"]])
 
-    client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
-    # Build monthly trend block cleanly
-    lines = []
-    for r in data["monthly_data"]:
-        month = str(r["month"])[:7]
-        revenue = f"${r['revenue']:,.0f}"
-        mom = (
-            f"{r['mom_growth_pct']:+.1f}%"
-            if r["mom_growth_pct"] is not None
-            else "n/a"
-        )
-        lines.append(f"  {month}: {revenue} | MoM: {mom}")
-
-    monthly_block = "\n".join(lines)
-
-    # Prompt
     prompt = f"""
 You are a senior business analyst. Analyze this sales data and return a JSON object.
 
@@ -129,65 +98,43 @@ PRODUCT DATA:
 - Average month-over-month growth: {data['avg_mom_growth_pct']}%
 - Revenue drop alerts: {data['risk_months'] if data['risk_months'] else 'None'}
 
-Monthly revenue trend (oldest to newest):
-
-{monthly_block}
+Monthly revenue trend:
+{monthly_lines}
 
 Return ONLY a valid JSON object with exactly these two fields:
 {{
-  "summary": "A single sentence (max 30 words) summarizing the product's 2024 performance.",
+  "summary": "A single sentence (max 30 words) summarizing performance.",
   "recommendations": [
-    "First specific, actionable recommendation based on the data.",
-    "Second specific, actionable recommendation based on the data.",
-    "Third specific, actionable recommendation based on the data."
+    "First specific actionable recommendation.",
+    "Second specific actionable recommendation.",
+    "Third specific actionable recommendation."
   ]
 }}
-
-No preamble. No markdown. No explanation. Only the JSON object.
+No preamble. No markdown. Only the JSON object.
 """
 
-    # New SDK call
-    response = client.messages.create(
+    message = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=800,
-        messages=[
-            {"role": "user", "content": prompt}
-        ]
+        max_tokens=1000,
+        messages=[{"role": "user", "content": prompt}]
     )
 
-    raw = response.content[0].text.strip()
-
-    # Remove accidental code fences
+    raw = message.content[0].text.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
-        raw = raw.strip()
+    return json.loads(raw.strip())
 
-    return json.loads(raw)
-
-
-# ── Route ───────────────────────────────────────────────────────────────────
 @app.get("/insights/{product}", response_model=InsightResponse)
 def get_insights(product: str):
-    """
-    Returns AI-generated insights for a given product.
-
-    Valid values: Product_A, Product_B, Product_C
-    """
     if product not in VALID_PRODUCTS:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid product '{product}'. Valid options: {VALID_PRODUCTS}"
         )
-
-    # Step 1: Pull data from DuckDB
-    data = get_product_data(product)
-
-    # Step 2: Ask Claude for the insight
+    data    = get_product_data(product)
     insight = get_claude_insight(data)
-
-    # Step 3: Assemble and validate the full response via Pydantic
     return InsightResponse(
         product=data["product"],
         total_revenue=data["total_revenue"],
@@ -199,9 +146,6 @@ def get_insights(product: str):
         recommendations=insight["recommendations"],
     )
 
-
-# ── Health check ────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
-    """Quick check that the API is running."""
-    return {"status": "ok", "db": DB_PATH}
+    return {"status": "ok", "db": get_db_path()}
